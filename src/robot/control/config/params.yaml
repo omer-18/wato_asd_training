@@ -1,3 +1,17 @@
-# control_node:
-#   ros__parameters:
+control_node:
+  ros__parameters:
+    # Lookahead distance for Pure Pursuit Control (meters)
+    # Larger values make motion smoother but less precise
+    # Smaller values improve accuracy but can lead to sharper movements
+    # Set to 1.2m for good balance between smoothness and precision
+    lookahead_distance: 1.2
     
+    # Distance to consider the goal reached (meters)
+    # Robot will stop when within this distance of the final goal point
+    goal_tolerance: 0.2
+    
+    # Constant forward speed (m/s)
+    # The robot will maintain this linear velocity while following the path
+    # Angular velocity is computed automatically based on path curvature
+    # Set to 0.6 m/s for safer navigation around obstacles
+    linear_speed: 0.6
