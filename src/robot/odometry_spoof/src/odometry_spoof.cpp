@@ -34,8 +34,10 @@ void OdometrySpoofNode::timerCallback() {
       tf2::TimePointZero  // latest available transform
     );
   } catch (const tf2::TransformException &ex) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "Could not transform %s to %s: %s",
-                source_frame.c_str(), target_frame.c_str(), ex.what());
+    // Only warn occasionally to reduce log spam - this is expected until TF tree is fully initialized
+    RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000, 
+                          "Could not transform %s to %s: %s (this is normal during startup)",
+                          source_frame.c_str(), target_frame.c_str(), ex.what());
     return;
   }
 

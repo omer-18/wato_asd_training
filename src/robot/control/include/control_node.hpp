@@ -4,6 +4,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 
 #include "control_core.hpp"
@@ -35,6 +36,9 @@ class ControlNode : public rclcpp::Node {
     // ROS2 subscriber: receives robot position from /odom/filtered topic
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     
+    // ROS2 subscriber: receives costmap to detect obstacles
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr costmap_sub_;
+    
     // ROS2 publisher: publishes velocity commands to /cmd_vel topic
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
 
@@ -44,8 +48,10 @@ class ControlNode : public rclcpp::Node {
     // Data storage
     nav_msgs::msg::Path current_path_;      // Current path to follow
     nav_msgs::msg::Odometry robot_odom_;    // Current robot odometry
+    nav_msgs::msg::OccupancyGrid::SharedPtr current_costmap_;  // Current costmap for obstacle detection
     bool path_received_;                    // Flag indicating if path has been received
     bool odom_received_;                    // Flag indicating if odometry has been received
+    bool costmap_received_;                 // Flag indicating if costmap has been received
 
     /**
      * Callback function called when a new path message is received
@@ -60,6 +66,13 @@ class ControlNode : public rclcpp::Node {
      * @param odom Shared pointer to the received Odometry message
      */
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom);
+
+    /**
+     * Callback function called when a new costmap message is received
+     * 
+     * @param costmap Shared pointer to the received OccupancyGrid message
+     */
+    void costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr costmap);
 
     /**
      * Timer callback: Periodically computes and publishes velocity commands

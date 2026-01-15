@@ -12,7 +12,9 @@ ControlCore::ControlCore(const rclcpp::Logger& logger,
   : logger_(logger),
     lookahead_distance_(lookahead_distance),
     goal_tolerance_(goal_tolerance),
-    linear_speed_(linear_speed)
+    linear_speed_(linear_speed),
+    obstacle_check_distance_(0.5),  // Check 0.5m ahead for obstacles
+    obstacle_threshold_(50)         // Consider cells with cost >= 50 as obstacles
 {
   RCLCPP_INFO(logger_, 
               "ControlCore initialized: lookahead=%.2fm, goal_tolerance=%.2fm, linear_speed=%.2fm/s",
@@ -115,7 +117,8 @@ geometry_msgs::msg::Twist ControlCore::computeVelocity(
     const geometry_msgs::msg::PoseStamped& target,
     double robot_x,
     double robot_y,
-    double robot_yaw) const
+    double robot_yaw,
+    const nav_msgs::msg::OccupancyGrid::SharedPtr costmap) const
 {
   geometry_msgs::msg::Twist cmd_vel;
 
@@ -147,6 +150,35 @@ geometry_msgs::msg::Twist ControlCore::computeVelocity(
     angle_error += 2.0 * M_PI;
   }
 
+  // Check if robot is too close to obstacles and needs special handling
+  bool too_close_to_obstacle = false;
+  if (costmap) {
+    too_close_to_obstacle = isTooCloseToObstacle(costmap, robot_x, robot_y, robot_yaw);
+  }
+
+  // If robot is too close to obstacles and needs to make a sharp turn (>90 degrees),
+  // turn in place or reverse slightly
+  if (too_close_to_obstacle && std::abs(angle_error) > M_PI / 2.0) {
+    // Turn in place: set linear velocity to zero or slightly reverse
+    // Use reverse if angle error is very large (>135 degrees)
+    if (std::abs(angle_error) > 3.0 * M_PI / 4.0) {
+      // Reverse slightly while turning
+      cmd_vel.linear.x = -0.2;  // Small reverse speed
+      cmd_vel.angular.z = (angle_error > 0) ? 1.0 : -1.0;  // Turn in place
+      RCLCPP_DEBUG(logger_,
+                   "Too close to obstacle with large angle error (%.2f rad). Reversing and turning.",
+                   angle_error);
+    } else {
+      // Turn in place
+      cmd_vel.linear.x = 0.0;
+      cmd_vel.angular.z = (angle_error > 0) ? 1.2 : -1.2;  // Turn in place at moderate speed
+      RCLCPP_DEBUG(logger_,
+                   "Too close to obstacle with angle error (%.2f rad). Turning in place.",
+                   angle_error);
+    }
+    return cmd_vel;
+  }
+
   // Pure Pursuit Control: Calculate curvature
   // The curvature is based on the geometry of a circle that passes through
   // the robot's current position and the lookahead point
@@ -165,6 +197,12 @@ geometry_msgs::msg::Twist ControlCore::computeVelocity(
   } else if (std::abs(angle_error) > M_PI / 4.0) {  // If turning more than 45 degrees
     speed_factor = 0.7;  // Reduce speed to 70% when making sharp turns
   }
+  
+  // Further reduce speed if close to obstacles
+  if (too_close_to_obstacle) {
+    speed_factor *= 0.5;  // Reduce speed by 50% when near obstacles
+  }
+  
   cmd_vel.linear.x = linear_speed_ * speed_factor;
 
   // Set angular velocity based on curvature
@@ -225,6 +263,72 @@ double ControlCore::extractYaw(const geometry_msgs::msg::Quaternion& quat)
   double yaw = std::atan2(siny_cosp, cosy_cosp);
 
   return yaw;
+}
+
+void ControlCore::setObstacleParams(double check_distance, int threshold)
+{
+  obstacle_check_distance_ = check_distance;
+  obstacle_threshold_ = threshold;
+  RCLCPP_INFO(logger_,
+              "Obstacle detection parameters updated: check_distance=%.2fm, threshold=%d",
+              obstacle_check_distance_, obstacle_threshold_);
+}
+
+bool ControlCore::isTooCloseToObstacle(
+    const nav_msgs::msg::OccupancyGrid::SharedPtr costmap,
+    double robot_x,
+    double robot_y,
+    double robot_yaw) const
+{
+  if (!costmap || costmap->data.empty()) {
+    return false;
+  }
+
+  // The costmap is in the robot's local frame (centered at robot)
+  // We need to check cells in front of the robot within obstacle_check_distance_
+  
+  double resolution = costmap->info.resolution;
+  int width = costmap->info.width;
+  int height = costmap->info.height;
+  
+  // For a robot-centered costmap, the robot is at the center of the grid
+  // The costmap origin is typically set so the robot is at (0, 0) in world coordinates
+  // This means the robot is at (width/2, height/2) in grid coordinates
+  int robot_grid_x = width / 2;
+  int robot_grid_y = height / 2;
+  
+  // Check cells in front of the robot (along positive x-axis in robot frame)
+  // We'll check a rectangular area in front of the robot
+  int check_cells = static_cast<int>(obstacle_check_distance_ / resolution);
+  
+  // Check a rectangular area in front of the robot (slightly wider than robot)
+  int check_width = static_cast<int>(0.6 / resolution);  // Check 0.6m wide (robot width + margin)
+  
+  for (int i = 1; i <= check_cells; ++i) {
+    for (int j = -check_width / 2; j <= check_width / 2; ++j) {
+      int grid_x = robot_grid_x + i;
+      int grid_y = robot_grid_y + j;
+      
+      // Check bounds
+      if (grid_x < 0 || grid_x >= width || grid_y < 0 || grid_y >= height) {
+        continue;
+      }
+      
+      int index = grid_y * width + grid_x;
+      if (index < 0 || index >= static_cast<int>(costmap->data.size())) {
+        continue;
+      }
+      
+      int8_t cell_value = costmap->data[index];
+      
+      // Check if cell is an obstacle (value >= threshold, or unknown but treat as obstacle)
+      if (cell_value >= obstacle_threshold_ || cell_value == -1) {
+        return true;  // Found an obstacle too close
+      }
+    }
+  }
+  
+  return false;  // No obstacles found within obstacle_check_distance_
 }
 
 }  

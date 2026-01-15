@@ -23,14 +23,22 @@ ControlNode::ControlNode()
   this->declare_parameter<double>("lookahead_distance", 1.0);
   this->declare_parameter<double>("goal_tolerance", 0.1);
   this->declare_parameter<double>("linear_speed", 0.5);
+  this->declare_parameter<double>("obstacle_check_distance", 0.5);
+  this->declare_parameter<int>("obstacle_threshold", 50);
 
   // Get parameters
   double lookahead_distance = this->get_parameter("lookahead_distance").as_double();
   double goal_tolerance = this->get_parameter("goal_tolerance").as_double();
   double linear_speed = this->get_parameter("linear_speed").as_double();
+  double obstacle_check_distance = this->get_parameter("obstacle_check_distance").as_double();
+  int obstacle_threshold = this->get_parameter("obstacle_threshold").as_int();
 
   // Reinitialize control core with parameters
   control_ = robot::ControlCore(this->get_logger(), lookahead_distance, goal_tolerance, linear_speed);
+  control_.setObstacleParams(obstacle_check_distance, obstacle_threshold);
+  
+  // Initialize flags
+  costmap_received_ = false;
 
   // Create subscriber to receive planned paths from planner node
   path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
@@ -46,6 +54,13 @@ ControlNode::ControlNode()
       std::bind(&ControlNode::odomCallback, this, std::placeholders::_1)
   );
 
+  // Create subscriber to receive costmap for obstacle detection
+  costmap_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
+      "/costmap",
+      10,
+      std::bind(&ControlNode::costmapCallback, this, std::placeholders::_1)
+  );
+
   // Create publisher to send velocity commands to the /cmd_vel topic
   // The robot's motor controller will subscribe to this to move the robot
   cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
@@ -58,7 +73,7 @@ ControlNode::ControlNode()
   );
 
   RCLCPP_INFO(this->get_logger(), 
-              "Control node initialized. Listening to /path and /odom/filtered. Publishing to /cmd_vel");
+              "Control node initialized. Listening to /path, /odom/filtered, and /costmap. Publishing to /cmd_vel");
 }
 
 /**
@@ -88,6 +103,15 @@ void ControlNode::odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom) {
   // Store the latest odometry
   robot_odom_ = *odom;
   odom_received_ = true;
+}
+
+/**
+ * Callback function triggered when a new costmap message arrives
+ */
+void ControlNode::costmapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr costmap) {
+  // Store the latest costmap for obstacle detection
+  current_costmap_ = costmap;
+  costmap_received_ = true;
 }
 
 /**
@@ -159,11 +183,14 @@ void ControlNode::controlLoop() {
   }
 
   // Compute velocity command using Pure Pursuit Control
+  // Pass costmap if available for obstacle detection
+  nav_msgs::msg::OccupancyGrid::SharedPtr costmap_ptr = costmap_received_ ? current_costmap_ : nullptr;
   geometry_msgs::msg::Twist cmd_vel = control_.computeVelocity(
       *lookahead_point,
       robot_x,
       robot_y,
-      robot_yaw
+      robot_yaw,
+      costmap_ptr
   );
 
   // Publish the velocity command

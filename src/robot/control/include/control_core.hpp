@@ -4,6 +4,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include <optional>
@@ -64,13 +65,15 @@ class ControlCore {
      * @param robot_x Current robot x position
      * @param robot_y Current robot y position
      * @param robot_yaw Current robot orientation (yaw angle in radians)
+     * @param costmap Optional costmap for obstacle detection (nullptr if not available)
      * @return Twist message with linear and angular velocity commands
      */
     geometry_msgs::msg::Twist computeVelocity(
         const geometry_msgs::msg::PoseStamped& target,
         double robot_x,
         double robot_y,
-        double robot_yaw) const;
+        double robot_yaw,
+        const nav_msgs::msg::OccupancyGrid::SharedPtr costmap = nullptr) const;
 
     /**
      * Check if the robot has reached the goal
@@ -105,11 +108,39 @@ class ControlCore {
      */
     static double extractYaw(const geometry_msgs::msg::Quaternion& quat);
 
+    /**
+     * Set obstacle detection parameters
+     * 
+     * @param check_distance Distance ahead to check for obstacles (meters)
+     * @param threshold Cost value threshold for obstacles (0-100)
+     */
+    void setObstacleParams(double check_distance, int threshold);
+
+    /**
+     * Check if robot is too close to obstacles in the costmap
+     * 
+     * The costmap is in the robot's local frame (centered at robot).
+     * This function checks cells in front of the robot for obstacles.
+     * 
+     * @param costmap Costmap to check for obstacles (in robot frame)
+     * @param robot_x Current robot x position (in global frame, not used but kept for API consistency)
+     * @param robot_y Current robot y position (in global frame, not used but kept for API consistency)
+     * @param robot_yaw Current robot orientation (not used but kept for API consistency)
+     * @return true if obstacles are detected within obstacle_check_distance_
+     */
+    bool isTooCloseToObstacle(
+        const nav_msgs::msg::OccupancyGrid::SharedPtr costmap,
+        double robot_x,
+        double robot_y,
+        double robot_yaw) const;
+
   private:
     rclcpp::Logger logger_;
     double lookahead_distance_;
     double goal_tolerance_;
     double linear_speed_;
+    double obstacle_check_distance_;  // Distance to check for obstacles
+    int obstacle_threshold_;          // Cost value threshold for obstacles
 };
 
 } 

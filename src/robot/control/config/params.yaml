@@ -15,3 +15,14 @@ control_node:
     # Angular velocity is computed automatically based on path curvature
     # Set to 0.6 m/s for safer navigation around obstacles
     linear_speed: 0.6
+    
+    # Obstacle detection parameters
+    # Distance ahead to check for obstacles (meters)
+    # When robot is this close to obstacles and needs to make a sharp turn,
+    # it will turn in place or reverse instead of trying to turn while moving forward
+    obstacle_check_distance: 0.5
+    
+    # Cost value threshold for obstacles (0-100)
+    # Cells with cost >= this value are considered obstacles
+    # Lower values make the robot more cautious, higher values allow it to get closer
+    obstacle_threshold: 50
